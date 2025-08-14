@@ -46,66 +46,61 @@ async function getServerTools(serverScriptPath: string): Promise<{tools: Tool[],
     description: tool.description,
     input_schema: tool.inputSchema,
   }));
+  // デバッグ出力
+  console.log(`\n[DEBUG] ツールリスト for ${serverScriptPath}`);
+  tools.forEach((tool, idx) => {
+    console.log(`[DEBUG] Tool${idx + 1}: name='${tool.name}', description='${tool.description}'`);
+  });
   return { tools, client, transport };
 }
 
 // クエリに最もマッチするサーバーを選択
 async function selectServerScript(query: string): Promise<{path: string, tools: Tool[], client: Client, transport: StdioClientTransport}> {
-  let bestScore = -1;
-  let best: any = null;
-  let bestHitLog = '';
-  // クエリを小文字化し、記号・空白で分割（日本語・英語対応）
-  const queryWords = query.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').split(' ').filter(Boolean);
+  // 1. 各サーバーのツール情報をすべて取得
+  const allServerInfos: { path: string, tools: Tool[], client: Client, transport: StdioClientTransport }[] = [];
   for (const path of SERVER_CANDIDATES) {
     try {
       const { tools, client, transport } = await getServerTools(path);
-      console.log(`\n[DEBUG] サーバー: ${path}`);
-      tools.forEach((tool, idx) => {
-        console.log(`[DEBUG] Tool${idx + 1}: name='${tool.name}', description='${tool.description}'`);
-      });
-      // ヒットした単語の記録用
-      let hitLog = '';
-      // クエリの単語がツール名やdescriptionに部分一致するかでスコアリング
-      const score = tools.reduce((acc, tool, tIdx) => {
-        let toolScore = 0;
-        const name = (tool.name || '').toLowerCase();
-        const desc = (tool.description || '').toLowerCase();
-        for (const word of queryWords) {
-          if (word && name.includes(word)) {
-            toolScore += 1;
-            hitLog += `[HIT] Tool${tIdx + 1} name: '${word}'\n`;
-          }
-          if (word && desc.includes(word)) {
-            toolScore += 1;
-            hitLog += `[HIT] Tool${tIdx + 1} description: '${word}'\n`;
-          }
-        }
-        return acc + toolScore;
-      }, 0);
-      if (score > bestScore) {
-        if (best) {
-          // 前のクライアントはクローズ
-          await best.client.close();
-        }
-        bestScore = score;
-        best = { path, tools, client, transport };
-        bestHitLog = hitLog;
-      } else {
-        // 使わないクライアントはクローズ
-        await client.close();
-      }
+      allServerInfos.push({ path, tools, client, transport });
     } catch (e) {
       // サーバー起動失敗時はスキップ
     }
   }
-  if (!best) throw new Error("No suitable MCP server found.");
-  console.log(`\n[DEBUG] Selected MCP server: ${best.path}`);
-  if (bestHitLog) {
-    console.log(`[DEBUG] ヒット根拠:\n${bestHitLog}`);
-  } else {
-    console.log('[DEBUG] ヒット根拠: なし');
+  if (allServerInfos.length === 0) throw new Error("No suitable MCP server found.");
+
+  // 2. LLMにツール情報とクエリを渡して最適なサーバーを選ばせる
+  const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
+  const toolListText = allServerInfos.map((info, idx) => {
+    const toolDescs = info.tools.map((tool, tIdx) => `  Tool${tIdx + 1}: name='${tool.name}', description='${tool.description}'`).join("\n");
+    return `サーバー${idx + 1}: path='${info.path}'\n${toolDescs}`;
+  }).join("\n\n");
+
+  const systemPrompt = `あなたはユーザーのクエリに最も適したMCPサーバーを選択するAIです。サーバーごとのツール情報を参考に、最も関連性が高いサーバーのpathのみを厳密に1つだけ出力してください。理由や説明は不要です。`;
+  const userPrompt = `ユーザークエリ: ${query}\n\n利用可能なサーバーとツール:\n${toolListText}`;
+
+  const response = await anthropic.messages.create({
+    model: "claude-3-5-sonnet-20241022",
+    max_tokens: 200,
+    messages: [
+      { role: "user", content: systemPrompt + "\n" + userPrompt }
+    ]
+  });
+  const llmText = response.content.map(c => c.type === "text" ? c.text : "").join("").trim();
+  // pathだけを抽出
+  const selectedPath = allServerInfos.find(info => llmText.includes(info.path))?.path;
+  if (!selectedPath) throw new Error("LLMが有効なサーバーパスを返しませんでした: " + llmText);
+  const selected = allServerInfos.find(info => info.path === selectedPath)!;
+  // 不要なクライアントはクローズ
+  for (const info of allServerInfos) {
+    if (info.path !== selectedPath) {
+      await info.client.close();
+      await info.transport.close?.();
+    }
   }
-  return best;
+  // サーバー名（最初のツール名）を表示
+  const serverName = selected.tools[0]?.name || selected.path.split("/").pop() || selected.path;
+  console.log(`\n[DEBUG] LLMが選択したMCP server: ${serverName}`);
+  return selected;
 }
 
 // 基本的なクライアントクラスを作成
