@@ -47,6 +47,9 @@ class MCPClient {
         this.transport = new StdioClientTransport({
             command,
             args: [serverScriptPath],
+            env: Object.fromEntries(
+                Object.entries(process.env).filter(([_, v]) => typeof v === "string") as [string, string][]
+            ), // 環境変数をstring型のみ渡す
         });
         await this.mcp.connect(this.transport);
 
