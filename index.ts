@@ -205,19 +205,39 @@ class MCPClient {
 
 // メインエントリーポイント
 async function main() {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  const query = await rl.question("最初のクエリを入力してください: ");
-  rl.close();
+  while (true) {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    const query = await rl.question("クエリを入力してください: ");
+    rl.close();
 
-  // クエリに応じてサーバーを自動選択
-  const { path, tools, client, transport } = await selectServerScript(query);
-  console.log(`Selected MCP server: ${path}`);
-  const mcpClient = new MCPClient(client, transport, tools);
-  try {
-    await mcpClient.chatLoop();
-  } finally {
-    await mcpClient.cleanup();
-    process.exit(0);
+    // クエリに応じてサーバーを自動選択
+    let serverInfo;
+    try {
+      serverInfo = await selectServerScript(query);
+    } catch (e) {
+      console.error(e);
+      continue;
+    }
+    const { path, tools, client, transport } = serverInfo;
+    const serverName = tools[0]?.name || path.split("/").pop() || path;
+
+    // サーバー選択確認
+    const rl2 = readline.createInterface({ input: process.stdin, output: process.stdout });
+    const confirm = await rl2.question(`MCPサーバー: ${serverName}を使用して良いですか？: `);
+    rl2.close();
+    if (confirm.trim().toLowerCase() !== "ok") {
+      console.log("終了します");
+      continue;
+    }
+
+    console.log(`Selected MCP server: ${path}`);
+    const mcpClient = new MCPClient(client, transport, tools);
+    try {
+      await mcpClient.processQuery(query).then(res => console.log("\n" + res));
+    } finally {
+      await mcpClient.cleanup();
+    }
+    // 1回で終了、再度最初のクエリ入力に戻る
   }
 }
 
