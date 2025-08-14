@@ -53,6 +53,9 @@ async function getServerTools(serverScriptPath: string): Promise<{tools: Tool[],
 async function selectServerScript(query: string): Promise<{path: string, tools: Tool[], client: Client, transport: StdioClientTransport}> {
   let bestScore = -1;
   let best: any = null;
+  let bestHitLog = '';
+  // クエリを小文字化し、記号・空白で分割（日本語・英語対応）
+  const queryWords = query.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').split(' ').filter(Boolean);
   for (const path of SERVER_CANDIDATES) {
     try {
       const { tools, client, transport } = await getServerTools(path);
@@ -60,11 +63,24 @@ async function selectServerScript(query: string): Promise<{path: string, tools: 
       tools.forEach((tool, idx) => {
         console.log(`[DEBUG] Tool${idx + 1}: name='${tool.name}', description='${tool.description}'`);
       });
-      // クエリがツール名やdescriptionに含まれるかでスコアリング
-      const score = tools.reduce((acc, tool) => {
-        const nameMatch = tool.name && query.includes(tool.name) ? 2 : 0;
-        const descMatch = tool.description && tool.description.includes(query) ? 1 : 0;
-        return acc + nameMatch + descMatch;
+      // ヒットした単語の記録用
+      let hitLog = '';
+      // クエリの単語がツール名やdescriptionに部分一致するかでスコアリング
+      const score = tools.reduce((acc, tool, tIdx) => {
+        let toolScore = 0;
+        const name = (tool.name || '').toLowerCase();
+        const desc = (tool.description || '').toLowerCase();
+        for (const word of queryWords) {
+          if (word && name.includes(word)) {
+            toolScore += 1;
+            hitLog += `[HIT] Tool${tIdx + 1} name: '${word}'\n`;
+          }
+          if (word && desc.includes(word)) {
+            toolScore += 1;
+            hitLog += `[HIT] Tool${tIdx + 1} description: '${word}'\n`;
+          }
+        }
+        return acc + toolScore;
       }, 0);
       if (score > bestScore) {
         if (best) {
@@ -73,6 +89,7 @@ async function selectServerScript(query: string): Promise<{path: string, tools: 
         }
         bestScore = score;
         best = { path, tools, client, transport };
+        bestHitLog = hitLog;
       } else {
         // 使わないクライアントはクローズ
         await client.close();
@@ -82,6 +99,12 @@ async function selectServerScript(query: string): Promise<{path: string, tools: 
     }
   }
   if (!best) throw new Error("No suitable MCP server found.");
+  console.log(`\n[DEBUG] Selected MCP server: ${best.path}`);
+  if (bestHitLog) {
+    console.log(`[DEBUG] ヒット根拠:\n${bestHitLog}`);
+  } else {
+    console.log('[DEBUG] ヒット根拠: なし');
+  }
   return best;
 }
 
