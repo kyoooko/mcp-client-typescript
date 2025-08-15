@@ -55,7 +55,8 @@ async function getServerTools(serverScriptPath: string): Promise<{tools: Tool[],
 }
 
 // クエリに最もマッチするサーバーを選択
-async function selectServerScript(query: string): Promise<{path: string, tools: Tool[], client: Client, transport: StdioClientTransport}> {
+// selectedToolを返すよう型を修正
+async function selectServerScript(query: string): Promise<{path: string, tools: Tool[], client: Client, transport: StdioClientTransport, selectedTool: Tool}> {
   // 1. 各サーバーのツール情報をすべて取得
   const allServerInfos: { path: string, tools: Tool[], client: Client, transport: StdioClientTransport }[] = [];
   for (const path of SERVER_CANDIDATES) {
@@ -68,15 +69,23 @@ async function selectServerScript(query: string): Promise<{path: string, tools: 
   }
   if (allServerInfos.length === 0) throw new Error("No suitable MCP server found.");
 
-  // 2. LLMにツール情報とクエリを渡して最適なサーバーを選ばせる
+  // 2. ツール単位でLLMに最適なツールを選ばせる
   const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
-  const toolListText = allServerInfos.map((info, idx) => {
-    const toolDescs = info.tools.map((tool, tIdx) => `  Tool${tIdx + 1}: name='${tool.name}', description='${tool.description}'`).join("\n");
-    return `サーバー${idx + 1}: path='${info.path}'\n${toolDescs}`;
-  }).join("\n\n");
+  // 各ツールを一意に識別できるよう path + tool名 でリスト化
+  const allTools = allServerInfos.flatMap(info =>
+    info.tools.map(tool => ({
+      path: info.path,
+      name: tool.name,
+      description: tool.description,
+      input_schema: tool.input_schema
+    }))
+  );
+  const toolListText = allTools.map((tool, idx) =>
+    `Tool${idx + 1}: path='${tool.path}', name='${tool.name}', description='${tool.description}'`
+  ).join("\n");
 
-  const systemPrompt = `あなたはユーザーのクエリに最も適したMCPサーバーを選択するAIです。サーバーごとのツール情報を参考に、最も関連性が高いサーバーのpathのみを厳密に1つだけ出力してください。理由や説明は不要です。`;
-  const userPrompt = `ユーザークエリ: ${query}\n\n利用可能なサーバーとツール:\n${toolListText}`;
+  const systemPrompt = `あなたはユーザーのクエリに最も適したMCPサーバーのツール（pathとtool名の組み合わせ）を選択するAIです。全ツール情報を参考に、最も関連性が高いツールのpathとtool名のみを厳密に1つだけ出力してください。理由や説明は不要です。出力形式は必ず path=<パス>, name=<ツール名> のみ。`;
+  const userPrompt = `ユーザークエリ: ${query}\n\n利用可能なツールリスト:\n${toolListText}`;
 
   const response = await anthropic.messages.create({
     model: "claude-3-5-sonnet-20241022",
@@ -86,10 +95,15 @@ async function selectServerScript(query: string): Promise<{path: string, tools: 
     ]
   });
   const llmText = response.content.map(c => c.type === "text" ? c.text : "").join("").trim();
-  // pathだけを抽出
-  const selectedPath = allServerInfos.find(info => llmText.includes(info.path))?.path;
-  if (!selectedPath) throw new Error("LLMが有効なサーバーパスを返しませんでした: " + llmText);
-  const selected = allServerInfos.find(info => info.path === selectedPath)!;
+  // pathとnameを抽出
+  const match = llmText.match(/path=(.*?),\s*name=(.*)/);
+  if (!match) throw new Error("LLMが有効なツール選択を返しませんでした: " + llmText);
+  const selectedPath = match[1].trim();
+  const selectedName = match[2].trim();
+  const selectedServer = allServerInfos.find(info => info.path === selectedPath);
+  if (!selectedServer) throw new Error("該当サーバーが見つかりません: " + selectedPath);
+  const selectedTool = selectedServer.tools.find(t => t.name === selectedName);
+  if (!selectedTool) throw new Error("該当ツールが見つかりません: " + selectedName);
   // 不要なクライアントはクローズ
   for (const info of allServerInfos) {
     if (info.path !== selectedPath) {
@@ -97,10 +111,8 @@ async function selectServerScript(query: string): Promise<{path: string, tools: 
       await info.transport.close?.();
     }
   }
-  // サーバー名（最初のツール名）を表示
-  const serverName = selected.tools[0]?.name || selected.path.split("/").pop() || selected.path;
-  console.log(`\n[DEBUG] LLMが選択したMCP server: ${serverName}`);
-  return selected;
+  console.log(`\n[DEBUG] LLMが選択したMCPツール: ${selectedName} (in ${selectedPath})`);
+  return { ...selectedServer, selectedTool };
 }
 
 // 基本的なクライアントクラスを作成
@@ -210,7 +222,7 @@ async function main() {
     const query = await rl.question("クエリを入力してください: ");
     rl.close();
 
-    // クエリに応じてサーバーを自動選択
+    // クエリに応じて最適なツールを自動選択
     let serverInfo;
     try {
       serverInfo = await selectServerScript(query);
@@ -218,20 +230,21 @@ async function main() {
       console.error(e);
       continue;
     }
-    const { path, tools, client, transport } = serverInfo;
-    const serverName = tools[0]?.name || path.split("/").pop() || path;
+    const { path, tools, client, transport, selectedTool } = serverInfo;
+    const toolLabel = `${selectedTool.name}`;
 
-    // サーバー選択確認
+    // ツール選択確認
     const rl2 = readline.createInterface({ input: process.stdin, output: process.stdout });
-    const confirm = await rl2.question(`MCPサーバー: ${serverName}を使用して良いですか？: `);
+    const confirm = await rl2.question(`MCPツール: ${toolLabel} を使用して良いですか？: `);
     rl2.close();
     if (confirm.trim().toLowerCase() !== "ok") {
       console.log("終了します");
       continue;
     }
 
-    console.log(`Selected MCP server: ${path}`);
-    const mcpClient = new MCPClient(client, transport, tools);
+    console.log(`Selected MCP tool: ${selectedTool.name} in ${path}`);
+    // 選択ツールのみをMCPClientに渡す
+    const mcpClient = new MCPClient(client, transport, [selectedTool]);
     try {
       await mcpClient.processQuery(query).then(res => console.log("\n" + res));
     } finally {
