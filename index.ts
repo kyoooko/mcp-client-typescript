@@ -181,8 +181,12 @@ class MCPClient {
       content = JSON.stringify(content, null, 2);
     }
   // ユーザーの質問とMCPツールのレスポンスをもとに、直接的な日本語回答をGeminiで生成
-  const answerModel = this.genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-  const answerPrompt = `ユーザーの質問: ${query}\n\n次のMCPツールのデータを参考に、ユーザーの質問に対して日本語で簡潔かつ直接的に回答してください。不要な情報は省き、質問に合った内容だけを答えてください。\n\nMCPツールの生データ: ${content}`;
+  // モデル指定
+  // const answerModel = this.genAI.getGenerativeModel({ model: "gemini-2.5-pro" });
+  const answerModel = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+  const answerPrompt = `ユーザーの質問: ${query}\n\n次のMCPツールのデータを参考に、ユーザーの質問に対して日本語で簡潔かつ直接的に回答してください。不要な情報は省き、質問に合った内容だけを答えてください。\n\nMCPツールの生データ（start）:\n${content}\nMCPツールの生データ（end）`;
+  // ここデバッグ
+  console.log(`[DEBUG] Geminiに送信する回答生成プロンプト:\n\n${answerPrompt}\n\n`);
   const answerResult = await answerModel.generateContent(answerPrompt);
   const answerText = answerResult.response.text().trim();
   return `【回答】\n${answerText}`;
