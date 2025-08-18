@@ -83,7 +83,7 @@ async function selectServerScript(query: string): Promise<{path: string, tools: 
 
   // Gemini APIでツール選択
   const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
   const allTools = allServerInfos.flatMap(info =>
     info.tools.map(tool => ({
       path: info.path,
@@ -139,7 +139,7 @@ class MCPClient {
       `Tool${idx + 1}: name='${tool.name}', description='${tool.description}', input_schema=${JSON.stringify(tool.input_schema)}`
     ).join("\n");
     const prompt = `あなたはMCPサーバーツールを使うAIです。以下のツールリストから、ユーザーのクエリに最も適したツール名とその入力値(JSON)を1つだけ厳密に出力してください。\n必須項目や型はinput_schemaを必ず参照し、必須項目は必ず埋めてください。理由や説明は不要です。出力形式は必ず name=<ツール名>, args=<JSON> のみ。\nユーザークエリ: ${query}\n\n利用可能なツールリスト:\n${toolListText}`;
-    const model = this.genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
     const result = await model.generateContent(prompt);
     const llmText = result.response.text().trim();
     const match = llmText.match(/name=(.*?),\s*args=(\{.*\})/);
@@ -193,6 +193,9 @@ class MCPClient {
   }
   const answerPromptPath = `${outputDir}/${fileName}`;
   fs.writeFileSync(answerPromptPath, answerPrompt, "utf-8");
+  // answerPromptの文字数デバッグ出力
+  const charCount = answerPrompt.length;
+  console.log(`[DEBUG] answerPrompt 文字数: ${charCount}`);
   // Gemini回答生成時にファイルパスを渡す
   const answerModel = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
   const answerPromptForLLM = `ユーザーの質問: ${query}\n\n「${answerPromptPath}」というファイルにMCPツールのデータと指示が全て記載されています。その内容を参考に、ユーザーの質問に対して日本語で簡潔かつ直接的に回答してください。不要な情報は省き、質問に合った内容だけを答えてください。`;
