@@ -1,7 +1,7 @@
-
-// Gemini APIを使用 
+// Gemini APIを使用: MCPサーバーのレスポンスをファイルに出力させ、それを読み込んで処理させる →作成されたファイルの読み込み権限がない
 // Gemini SDKは「Tool」機能が標準で存在しないため、ツール選択・引数生成・レスポンス解釈をすべてプロンプト設計と自前実装で補っています。
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import fs from "fs";
 // そのためTool型は自前定義
 type Tool = {
   name: string;
@@ -176,14 +176,27 @@ class MCPClient {
     } else if (typeof content === "object") {
       content = JSON.stringify(content, null, 2);
     }
-  // ユーザーの質問とMCPツールのレスポンスをもとに、直接的な日本語回答をGeminiで生成
-  // モデル指定
-  // const answerModel = this.genAI.getGenerativeModel({ model: "gemini-2.5-pro" });
-  const answerModel = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+  // answerPromptをファイルに出力
   const answerPrompt = `ユーザーの質問: ${query}\n\n次のMCPツールのデータを参考に、ユーザーの質問に対して日本語で簡潔かつ直接的に回答してください。不要な情報は省き、質問に合った内容だけを答えてください。\n\nMCPツールの生データ（start）:\n${content}\nMCPツールの生データ（end）`;
-  // ここデバッグ
-  console.log(`[DEBUG] Geminiに送信する回答生成プロンプト:\n\n${answerPrompt}\n\n`);
-  const answerResult = await answerModel.generateContent(answerPrompt);
+  // 一意なファイル名生成（output/answer_prompt_YYYYMMDD_HHMMSS.txt）
+  const now = new Date();
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  const fileName = `answer_prompt_${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.txt`;
+  const outputDir = "./output";
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir);
+  }
+  const answerPromptPath = `${outputDir}/${fileName}`;
+  fs.writeFileSync(answerPromptPath, answerPrompt, "utf-8");
+  // answerPromptの文字数デバッグ出力
+  const charCount = answerPrompt.length;
+  console.log(`[DEBUG] answerPrompt 文字数: ${charCount}`);
+  // Gemini回答生成時にファイルパスを渡す
+  const answerModel = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+  const answerPromptForLLM = `ユーザーの質問: ${query}\n\n「${answerPromptPath}」というファイルにMCPツールのデータと指示が全て記載されています。その内容を参考に、ユーザーの質問に対して日本語で簡潔かつ直接的に回答してください。不要な情報は省き、質問に合った内容だけを答えてください。`;
+  // デバッグ
+  console.log(`[DEBUG] Geminiに送信する回答生成プロンプト:\n\n${answerPromptForLLM}\n\n`);
+  const answerResult = await answerModel.generateContent(answerPromptForLLM);
   const answerText = answerResult.response.text().trim();
   return `【回答】\n${answerText}`;
   }

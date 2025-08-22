@@ -1,4 +1,5 @@
 
+// Anthropic APIを使用 →1分あたりのレート制限にかかりやすい
 // Claude SDKは「Tool」機能をネイティブでサポートしており、toolsパラメータにツール情報を渡すことで、LLMが自動的にツール呼び出し・引数生成・レスポンス処理まで一貫して行います。
 import { Anthropic } from "@anthropic-ai/sdk";
 import { MessageParam, Tool } from "@anthropic-ai/sdk/resources/messages/messages.mjs";
