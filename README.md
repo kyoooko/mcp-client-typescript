@@ -86,6 +86,7 @@ Link-AGの下記の成果を取得し、
 * Toolのレスポンス10万文字制限の問題は突破
 * レート制限
     * 無料枠は個人Googleアカウント、ビジネスアカウントは有料枠はTier1
+    * https://ai.google.dev/gemini-api/docs/rate-limits?hl=ja#tier-1
     * Gemini 2.5 Flash
         * 無料枠のレート制限（TPM）: 25万トークン/分
         * 有料枠のレート制限（TPM）: 100万トークン/分
@@ -103,6 +104,7 @@ Link-AGの下記の成果を取得し、
     * 前提
         * ビジネスアカウント有料枠
         * 入力トークンのみ試算
+        * https://ai.google.dev/gemini-api/docs/pricing?hl=ja
     * Gemini 2.5 Flash
         * $0.30/100万トークン
     * Gemini 2.5 Flash-Lite
