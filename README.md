@@ -1,5 +1,6 @@
 # 概要
 * anthropicのサンプルをベースにクライアントMCPを作成した
+  * Vibe Codingで作成したプロトタイプ用のもののため、実用の際は改修が必要
 
 # 仕様
 * anthropicのサンプルでは`node build/index.js path/to/build/index.js`のように、第1引数にローカルMCPサーバーのパスを指定する必要があったが、どのMCPサーバーを使うかもMCPクライアント内でよしなに選択させるようにした
